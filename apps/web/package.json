@@ -1,0 +1,26 @@
+{
+  "name": "@ecology/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@ecology/authoring": "workspace:*",
+    "@ecology/content-mountain-ash": "workspace:*",
+    "@ecology/domain": "workspace:*",
+    "@ecology/schema": "workspace:*",
+    "@ecology/scene3d": "workspace:*",
+    "@ecology/sim-core": "workspace:*",
+    "@ecology/storage": "workspace:*",
+    "@ecology/worker-runtime": "workspace:*",
+    "idb": "^8.0.2",
+    "next": "^15.3.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "three": "^0.176.0",
+    "zod": "^3.24.3"
+  }
+}

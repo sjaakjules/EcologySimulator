@@ -1,0 +1,13 @@
+{
+  "name": "@ecology/sim-core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ecology/content-mountain-ash": "workspace:*",
+    "@ecology/domain": "workspace:*",
+    "@ecology/schema": "workspace:*"
+  }
+}

@@ -9,6 +9,8 @@ out
 .turbo
 .cache
 .vercel
+test-results
+playwright-report
 *.log
 npm-debug.log*
 pnpm-debug.log*

@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "baseUrl": ".",
+    "paths": {
+      "@ecology/authoring": ["packages/authoring/src/index.ts"],
+      "@ecology/content-mountain-ash": ["packages/content/mountain-ash/src/index.ts"],
+      "@ecology/domain": ["packages/domain/src/index.ts"],
+      "@ecology/schema": ["packages/schema/src/index.ts"],
+      "@ecology/scene3d": ["packages/scene3d/src/index.ts"],
+      "@ecology/sim-core": ["packages/sim-core/src/index.ts"],
+      "@ecology/storage": ["packages/storage/src/index.ts"],
+      "@ecology/worker-runtime": ["packages/worker-runtime/src/index.ts"]
+    }
+  }
+}
