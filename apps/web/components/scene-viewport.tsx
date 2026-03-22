@@ -1,17 +1,17 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { EcologySceneRuntime } from '@ecology/scene3d';
 import type { CameraState, FrameSnapshot, SelectionOverlay } from '@ecology/domain';
 import type { NormalizedBundle } from '@ecology/schema';
-import type { RenderCommand, RenderEvent } from '@ecology/worker-runtime';
+import type { RenderCommand, RenderEvent, RendererCapabilities, RendererStats } from '@ecology/worker-runtime';
 
 import type { VisualControlState } from './control-panel';
 
 interface SceneViewportProps {
   bundle: NormalizedBundle;
-  onBackendChange(backend: 'webgpu' | 'webgl' | 'main-thread'): void;
+  onBackendChange(backendLabel: string): void;
   onPick(selection?: { kind: 'anchor' | 'relation'; id: string }): void;
   onSceneInteract(): void;
   onVisualsChange(nextVisuals: Partial<VisualControlState>): void;
@@ -50,14 +50,16 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-const WORLD_CENTER: Vec3 = [50, 50, 14];
+const WORLD_CENTER: Vec3 = [0, 0, 12];
 const WORLD_UP: Vec3 = [0, 0, 1];
-const INITIAL_POSITION: Vec3 = [146, 18, 74];
+const INITIAL_POSITION: Vec3 = [44, -26, 28];
 const MIN_DISTANCE = 8;
 const MAX_DISTANCE = 220;
 const ORBIT_SPEED = 0.006;
 const PAN_SPEED = 0.0028;
 const DRAG_THRESHOLD = 4;
+const DEFAULT_YAW = 2.84;
+const DEFAULT_PITCH = -0.5;
 
 function distanceToZoomValue(distance: number) {
   return clamp(1 - (distance - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1);
@@ -177,6 +179,25 @@ function midpoint(a: Vec3, b: Vec3): Vec3 {
   return [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5];
 }
 
+function distanceBetween(a: Vec3, b: Vec3) {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+function boundsCenter(worldBounds: FrameSnapshot['worldBounds']): Vec3 {
+  return [
+    (worldBounds[0] + worldBounds[3]) * 0.5,
+    (worldBounds[1] + worldBounds[4]) * 0.5,
+    Math.max(0, worldBounds[2]) + (worldBounds[5] - worldBounds[2]) * 0.32
+  ];
+}
+
+function boundsDistance(worldBounds: FrameSnapshot['worldBounds']) {
+  const extentX = worldBounds[3] - worldBounds[0];
+  const extentY = worldBounds[4] - worldBounds[1];
+  const extentZ = worldBounds[5] - worldBounds[2];
+  return clamp(Math.max(extentX, extentY, extentZ) * 1.45, MIN_DISTANCE + 6, MAX_DISTANCE * 0.72);
+}
+
 function resolveSelectionPivot(selection: SelectionOverlay | undefined, snapshot: FrameSnapshot | undefined) {
   if (!selection || !snapshot) {
     return undefined;
@@ -291,16 +312,21 @@ export function SceneViewport({
     createCameraState(WORLD_CENTER, initialOrbit.yaw, initialOrbit.pitch, initialOrbit.distance)
   );
   const [hoveredItem, setHoveredItem] = useState<HoveredItem>();
+  const [rendererCapabilities, setRendererCapabilities] = useState<RendererCapabilities>();
+  const [rendererStats, setRendererStats] = useState<RendererStats>();
+  const [rendererMessage, setRendererMessage] = useState<string>();
   const snapshotRef = useRef(snapshot);
   const visualsRef = useRef(visuals);
   const orbitRef = useRef<OrbitState>({
     distance: initialOrbit.distance,
     target: WORLD_CENTER
   });
+  const selectionRef = useRef(selection);
   const bundleRef = useRef(bundle);
   const onPickRef = useRef(onPick);
   const onBackendChangeRef = useRef(onBackendChange);
   const dragState = useRef<DragState>(createInitialDragState());
+  const framedKeyRef = useRef('');
 
   const syncCamera = (camera = cameraRef.current) => {
     if (workerRef.current) {
@@ -314,6 +340,24 @@ export function SceneViewport({
     runtimeRef.current?.setCamera(camera);
   };
 
+  const syncFocusDistance = useCallback((camera = cameraRef.current) => {
+    const focusTarget =
+      visualsRef.current.focusLock === 'selection'
+        ? resolveSelectionPivot(selectionRef.current, snapshotRef.current) ?? orbitRef.current.target
+        : orbitRef.current.target;
+    const nextFocusDistance = clamp(distanceBetween(camera.position, focusTarget), 1, MAX_DISTANCE * 2);
+
+    if (Math.abs(nextFocusDistance - visualsRef.current.focusDistance) < 0.05) {
+      return;
+    }
+
+    visualsRef.current = {
+      ...visualsRef.current,
+      focusDistance: nextFocusDistance
+    };
+    onVisualsChange({ focusDistance: nextFocusDistance });
+  }, [onVisualsChange]);
+
   useEffect(() => {
     bundleRef.current = bundle;
   }, [bundle]);
@@ -321,6 +365,10 @@ export function SceneViewport({
   useEffect(() => {
     onPickRef.current = onPick;
   }, [onPick]);
+
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
 
   useEffect(() => {
     onBackendChangeRef.current = onBackendChange;
@@ -334,6 +382,36 @@ export function SceneViewport({
     snapshotRef.current = snapshot;
     setHoveredItem((current) => resolveHoveredItem(current?.selection, snapshot));
   }, [snapshot]);
+
+  useEffect(() => {
+    if (!snapshot) {
+      return;
+    }
+
+    const frameKey = `${snapshot.viewMode}:${snapshot.worldSeed}:${snapshot.worldBounds.join(':')}`;
+
+    if (framedKeyRef.current === frameKey) {
+      return;
+    }
+
+    framedKeyRef.current = frameKey;
+    const nextTarget = boundsCenter(snapshot.worldBounds);
+    const nextDistance = boundsDistance(snapshot.worldBounds);
+    orbitRef.current.target = nextTarget;
+    orbitRef.current.distance = nextDistance;
+    cameraRef.current = createCameraState(nextTarget, DEFAULT_YAW, DEFAULT_PITCH, nextDistance);
+    syncCamera(cameraRef.current);
+
+    const nextZoom = distanceToZoomValue(nextDistance);
+    if (Math.abs(nextZoom - visualsRef.current.cameraZoom) > 0.01) {
+      visualsRef.current = {
+        ...visualsRef.current,
+        cameraZoom: nextZoom
+      };
+      onVisualsChange({ cameraZoom: nextZoom });
+    }
+    syncFocusDistance(cameraRef.current);
+  }, [onVisualsChange, snapshot, syncFocusDistance]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -355,15 +433,23 @@ export function SceneViewport({
           const offscreen = canvas.transferControlToOffscreen();
           worker.onmessage = (event: MessageEvent<RenderEvent>) => {
             if (event.data.type === 'RendererReady') {
-              onBackendChangeRef.current(event.data.backend);
+              setRendererCapabilities(event.data.capabilities);
+              setRendererMessage(undefined);
+              onBackendChangeRef.current(
+                `${event.data.capabilities.webgl2 ? 'webgl2' : event.data.backend}${event.data.capabilities.offscreenCanvas ? ' worker' : ''}`
+              );
               worker.postMessage({
                 type: 'CameraUpdate',
                 camera: cameraRef.current
               } satisfies RenderCommand);
               worker.postMessage({
                 type: 'VisualsUpdate',
-                visuals: { holarchyDepth: visualsRef.current.holarchyDepth }
+                visuals: visualsRef.current
               } satisfies RenderCommand);
+            }
+
+            if (event.data.type === 'RendererStats') {
+              setRendererStats(event.data.stats);
             }
 
             if (event.data.type === 'HoverResult') {
@@ -372,6 +458,10 @@ export function SceneViewport({
 
             if (event.data.type === 'PickResult') {
               onPickRef.current(event.data.selection);
+            }
+
+            if (event.data.type === 'Log') {
+              setRendererMessage(event.data.message);
             }
           };
           worker.postMessage(
@@ -395,16 +485,22 @@ export function SceneViewport({
       const runtime = new EcologySceneRuntime(
         canvas,
         (nextSelection) => onPickRef.current(nextSelection),
-        () => onBackendChangeRef.current('main-thread'),
-        (nextSelection) => setHoveredItem(resolveHoveredItem(nextSelection, snapshotRef.current))
+        (capabilities) => {
+          setRendererCapabilities(capabilities);
+          setRendererMessage(undefined);
+          onBackendChangeRef.current(`main-thread ${capabilities.webgl2 ? 'webgl2' : 'webgl1'}`);
+        },
+        (nextSelection) => setHoveredItem(resolveHoveredItem(nextSelection, snapshotRef.current)),
+        (stats) => setRendererStats(stats),
+        (message) => setRendererMessage(message),
+        'main-thread'
       );
 
       await runtime.init(width, height, dpr);
       runtime.setBundle(bundleRef.current);
       runtimeRef.current = runtime;
       runtime.setCamera(cameraRef.current);
-      runtime.setVisuals({ holarchyDepth: visualsRef.current.holarchyDepth });
-      onBackendChangeRef.current('main-thread');
+      runtime.setVisuals(visualsRef.current);
     };
 
     void setup();
@@ -494,12 +590,16 @@ export function SceneViewport({
     if (workerRef.current) {
       workerRef.current.postMessage({
         type: 'VisualsUpdate',
-        visuals: { holarchyDepth: visuals.holarchyDepth }
+        visuals
       } satisfies RenderCommand);
     } else {
-      runtimeRef.current?.setVisuals({ holarchyDepth: visuals.holarchyDepth });
+      runtimeRef.current?.setVisuals(visuals);
     }
-  }, [visuals.holarchyDepth]);
+  }, [visuals]);
+
+  useEffect(() => {
+    syncFocusDistance(cameraRef.current);
+  }, [selection, snapshot, visuals.focusLock, syncFocusDistance]);
 
   const sendPick = (x: number, y: number) => {
     if (workerRef.current) {
@@ -547,6 +647,7 @@ export function SceneViewport({
       orbitRef.current.distance
     );
     syncCamera();
+    syncFocusDistance(cameraRef.current);
   };
 
   return (
@@ -560,6 +661,22 @@ export function SceneViewport({
           <strong>{hoveredItem.label}</strong>
           {hoveredItem.starred ? ' *' : ''}
         </button>
+      ) : null}
+      {rendererStats ? (
+        <div className="render-stats-strip">
+          <span>{rendererCapabilities?.webgl2 ? 'webgl2' : rendererStats.backend}</span>
+          <span>{rendererStats.renderedEntityPoints.toLocaleString()} entity pts</span>
+          <span>{rendererStats.renderedRelationPoints.toLocaleString()} relation pts</span>
+          <span>{rendererStats.droppedPoints.toLocaleString()} dropped</span>
+          <span>{rendererStats.pointBudgetPreset}</span>
+          <span>{rendererStats.dofMode}</span>
+          <span>{rendererStats.glowMode}</span>
+        </div>
+      ) : null}
+      {rendererMessage ? (
+        <div className="render-status-chip" role="status">
+          {rendererMessage}
+        </div>
       ) : null}
       <canvas
         ref={canvasRef}
@@ -633,6 +750,7 @@ export function SceneViewport({
               position: add(cameraRef.current.position, translation)
             };
             syncCamera();
+            syncFocusDistance(cameraRef.current);
           }
 
           dragState.current.lastX = event.clientX;
@@ -684,6 +802,14 @@ export function SceneViewport({
               ...visualsRef.current,
               ...nextVisuals
             };
+            if (visualsRef.current.focusLock === 'camera' || visualsRef.current.focusLock === 'selection') {
+              const focusTarget =
+                visualsRef.current.focusLock === 'selection'
+                  ? resolveSelectionPivot(selectionRef.current, snapshotRef.current) ?? orbitRef.current.target
+                  : orbitRef.current.target;
+              nextVisuals.focusDistance = clamp(distanceBetween(cameraRef.current.position, focusTarget), 1, MAX_DISTANCE * 2);
+              visualsRef.current.focusDistance = nextVisuals.focusDistance;
+            }
             onVisualsChange(nextVisuals);
           }
         }}

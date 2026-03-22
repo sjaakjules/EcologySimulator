@@ -1,4 +1,4 @@
-import rawMountainAshBundle from '../large_old_eucalypt_content_layer_v3.json';
+import rawMountainAshBundle from '../large_old_eucalypt_content_layer_v4.json';
 
 export { rawMountainAshBundle };
 

@@ -4,7 +4,7 @@ import { startTransition, useDeferredValue, useEffect, useRef, useState } from '
 
 import { applyPatches, createPatch, type AuthoringPatch } from '@ecology/authoring';
 import { getRawMountainAshBundle } from '@ecology/content-mountain-ash';
-import type { FrameSnapshot, SelectionOverlay, WorldSeedConfig } from '@ecology/domain';
+import type { FrameSnapshot, SelectionOverlay, WorldSeedConfig, WorldViewMode } from '@ecology/domain';
 import { normalizeBundle, rawContentBundleSchema, type NormalizedBundle, type RawContentBundle } from '@ecology/schema';
 import { createEcologyStorage, type EcologyStorage } from '@ecology/storage';
 import type { SimulationCommand, SimulationEvent } from '@ecology/worker-runtime';
@@ -20,11 +20,22 @@ const panelSideById: Record<PanelId, 'left' | 'right' | 'bottom'> = {
   world: 'left'
 };
 
-function buildConfig(bundle: NormalizedBundle, seed: number): WorldSeedConfig {
+function buildConfig(bundle: NormalizedBundle, seed: number, viewMode: WorldViewMode): WorldSeedConfig {
   return {
     seed,
-    presetId: bundle.defaultWorldPresetId
+    presetId: bundle.defaultWorldPresetId,
+    viewMode
   };
+}
+
+function parseRuntimeBundle(candidate: unknown, fallback: RawContentBundle) {
+  try {
+    const parsed = rawContentBundleSchema.parse(candidate);
+    normalizeBundle(parsed);
+    return parsed;
+  } catch {
+    return fallback;
+  }
 }
 
 function setExclusivePanelState(
@@ -62,7 +73,14 @@ export function SimulatorApp() {
     cameraZoom: 0.48,
     holarchyDepth: 0.48,
     lockCameraZoom: false,
-    lockHolarchyDepth: false
+    lockHolarchyDepth: false,
+    pointBudgetPreset: 'balanced',
+    maxPoints: 262_144,
+    dofMode: 'shader',
+    focusDistance: 28,
+    focusLock: 'camera',
+    glowMode: 'halo',
+    transparencyMode: 'solid_core'
   });
   const [baseRawBundle, setBaseRawBundle] = useState<RawContentBundle>(() =>
     rawContentBundleSchema.parse(getRawMountainAshBundle())
@@ -78,6 +96,7 @@ export function SimulatorApp() {
   const [selection, setSelection] = useState<SelectionOverlay>();
   const [playing, setPlaying] = useState(false);
   const [seed, setSeed] = useState(42);
+  const [viewMode, setViewMode] = useState<WorldViewMode>('tuning_standard');
   const [backendLabel, setBackendLabel] = useState('booting');
   const [status, setStatus] = useState('Loading the canonical Mountain Ash bundle.');
   const deferredSelection = useDeferredValue(selection);
@@ -103,7 +122,7 @@ export function SimulatorApp() {
       const savedBundle = await storage.getBundle('working');
       const savedPatches = await storage.loadPatches();
       const fallback = rawContentBundleSchema.parse(getRawMountainAshBundle());
-      const parsedBase = savedBundle ? rawContentBundleSchema.parse(savedBundle) : fallback;
+      const parsedBase = savedBundle ? parseRuntimeBundle(savedBundle, fallback) : fallback;
 
       if (!mounted) {
         return;
@@ -157,12 +176,12 @@ export function SimulatorApp() {
     const command: SimulationCommand = {
       type: patches.length === 0 ? 'LoadBundle' : 'ApplyAuthoringPatch',
       bundle: normalizedBundle,
-      config: buildConfig(normalizedBundle, seed),
+      config: buildConfig(normalizedBundle, seed, viewMode),
       ...(patches.length === 0 ? {} : { patches })
     } as SimulationCommand;
 
     simWorkerRef.current.postMessage(command);
-  }, [normalizedBundle, patches, seed]);
+  }, [normalizedBundle, patches, seed, viewMode]);
 
   const commitPatch = async (path: (string | number)[], nextValue: unknown, label: string) => {
     const patch = createPatch(workingRawBundle, path, nextValue, label);
@@ -210,6 +229,7 @@ export function SimulatorApp() {
         snapshot={snapshot}
         status={status}
         visuals={visuals}
+        worldViewMode={viewMode}
         onAdvanceDay={() => {
           simWorkerRef.current?.postMessage({ type: 'AdvanceTicks', days: 1 } satisfies SimulationCommand);
         }}
@@ -232,7 +252,10 @@ export function SimulatorApp() {
         }}
         onImport={(file) => {
           void file.text().then(async (text) => {
-            const parsed = rawContentBundleSchema.parse(JSON.parse(text));
+            const parsed = parseRuntimeBundle(
+              JSON.parse(text),
+              rawContentBundleSchema.parse(getRawMountainAshBundle())
+            );
             await replaceBundle(parsed);
           });
         }}
@@ -249,7 +272,17 @@ export function SimulatorApp() {
         onRandomizeSeed={() => {
           const nextSeed = Math.floor(Math.random() * 10_000);
           setSeed(nextSeed);
-          setStatus(`Regenerating the world with seed ${nextSeed}.`);
+          setStatus(
+            `Regenerating the ${viewMode === 'tuning_standard' ? 'standard tuning scene' : 'hectare patch'} with seed ${nextSeed}.`
+          );
+        }}
+        onChangeWorldMode={(nextViewMode) => {
+          setViewMode(nextViewMode);
+          setStatus(
+            nextViewMode === 'tuning_standard'
+              ? 'Switched to the compact tuning scene with one representative of each entity.'
+              : 'Switched to the hectare patch comparison view.'
+          );
         }}
         onTogglePanel={(panelId) => {
           setPanelStates((current) =>

@@ -291,7 +291,7 @@ That means:
 
 ## 12. Performance targets
 
-For the default 1 ha patch:
+For the default standard tuning scene and alternate hectare patch:
 
 - desktop target: `60 fps`
 - integrated GPU minimum: `30 fps`
@@ -305,7 +305,7 @@ These are design targets and can be revised after profiling.
 
 The MVP is successful when:
 
-1. the user can fly or walk through a spatially faithful 1 ha Mountain Ash patch;
+1. the user can inspect a compact one-of-each Mountain Ash tuning scene and switch to a spatially faithful hectare patch when needed;
 2. the hero tree, hollows, logs, tree ferns, and understory are all inspectable;
 3. zooming in and out changes what entities are available and how they decompose;
 4. trails visibly differ by relation family;
@@ -328,7 +328,7 @@ This revision should produce:
 
 - updated `PDR.md`
 - updated `CodeBase.md`
-- updated `large_old_eucalypt_content_layer_v3.json`
+- updated `large_old_eucalypt_content_layer_v4.json`
 
 ## 16. Grounding sources
 

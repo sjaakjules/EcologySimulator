@@ -1,32 +1,45 @@
 import {
-  canonicalizeScaleBand,
+  organisationCheckpointIds,
+  organisationCheckpointValues,
   relationTrailStyleIds,
   relationTrailStyles,
-  scaleBandValues,
+  type KindCatalogEntry,
+  type NestedEntityLink,
+  type OrganisationCheckpoint,
+  type OrganisationCheckpointId,
+  type OrganisationScale,
   type PatchTarget,
   type RelationTrailStyle,
-  type RelationTrailStyleId,
-  type ScaleBand
+  type RelationTrailStyleId
 } from '@ecology/domain';
 import { z } from 'zod';
 
+const rawPrimitiveSchema = z.union([z.number(), z.string(), z.boolean(), z.null()]);
+
 const rawValueSchema = z.union([
-  z.number(),
-  z.string(),
-  z.boolean(),
+  rawPrimitiveSchema,
   z.array(z.unknown()),
   z.record(z.string(), z.unknown())
 ]);
 
 const rawParameterSchema = z
   .object({
-    default: z.union([z.number(), z.string(), z.boolean()]).optional(),
+    default: rawPrimitiveSchema.optional(),
     max: z.number().optional(),
     min: z.number().optional(),
+    notes: z.string().optional(),
     status: z.string().optional(),
-    tier: z.string().optional()
+    tier: z.string().optional(),
+    unit: z.string().optional()
   })
   .passthrough();
+
+const rawOrganisationScaleSchema = z.object({
+  checkpoint_id: z.string().optional(),
+  position_0_1: z.number(),
+  visible_plus_minus_0_1: z.number(),
+  visible_range_0_1: z.tuple([z.number(), z.number()])
+});
 
 const rawEntitySchema = z
   .object({
@@ -36,8 +49,16 @@ const rawEntitySchema = z
     kind: z.string(),
     scale: z.string(),
     description: z.string().optional(),
-    parts: z.array(z.string()).optional(),
-    parameters: z.record(z.string(), rawParameterSchema).optional()
+    parameters: z.record(z.string(), rawParameterSchema).optional(),
+    legacy_scale: z.string().optional(),
+    organisation_scale: rawOrganisationScaleSchema.optional(),
+    kind_branch: z.string().optional(),
+    kind_scale_bounds_0_1: z.tuple([z.number(), z.number()]).optional(),
+    contains_link_ids: z.array(z.string()).optional(),
+    nested_in_link_ids: z.array(z.string()).optional(),
+    allowed_nested_child_kind_ids: z.array(z.string()).optional(),
+    allowed_container_kind_ids: z.array(z.string()).optional(),
+    primary_nesting_link_type: z.string().optional()
   })
   .passthrough();
 
@@ -53,6 +74,37 @@ const rawRelationSchema = z
     support_sign: z.string().optional(),
     evidence: z.array(z.string()).optional(),
     parameters: z.record(z.string(), rawValueSchema).optional()
+  })
+  .passthrough();
+
+const rawNestedLinkSchema = z
+  .object({
+    id: z.string(),
+    parent: z.string(),
+    child: z.string(),
+    link_type: z.string().optional(),
+    type: z.string().optional(),
+    tier: z.string().optional(),
+    description: z.string().optional(),
+    source_ids: z.array(z.string()).optional()
+  })
+  .passthrough();
+
+const rawKindCatalogEntrySchema = z
+  .object({
+    id: z.string(),
+    label: z.string(),
+    branch: z.string(),
+    description: z.string().optional(),
+    organisation_bounds_0_1: z.tuple([z.number(), z.number()]).optional(),
+    default_checkpoint_id: z.string(),
+    legacy_kind_aliases: z.array(z.string()).optional(),
+    typical_child_kind_ids: z.array(z.string()).optional(),
+    typical_parent_kind_ids: z.array(z.string()).optional(),
+    primary_nesting_link_type: z.string().optional(),
+    example_entity_ids: z.array(z.string()).optional(),
+    source_ids: z.array(z.string()).optional(),
+    current_entity_count: z.number().optional()
   })
   .passthrough();
 
@@ -99,65 +151,129 @@ const rawWorldPresetSchema = z
   })
   .passthrough();
 
+const rawScaleCheckpointSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  value_0_1: z.number().optional(),
+  description: z.string().optional(),
+  examples: z.array(z.string()).optional(),
+  source_ids: z.array(z.string()).optional(),
+  zoom_band: z.array(z.number()).length(2).optional()
+});
+
+const rawScaleAxisSchema = z
+  .object({
+    axis_name: z.string(),
+    display_domain_0_1: z.tuple([z.number(), z.number()]).optional(),
+    entity_fields: z.record(z.string(), z.string()).optional(),
+    checkpoints: z.array(rawScaleCheckpointSchema)
+  })
+  .passthrough();
+
+const rawLegacyScaleBandSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  zoom_band: z.array(z.number()).length(2),
+  examples: z.array(z.string()).optional()
+});
+
 export const rawContentBundleSchema = z
   .object({
     schema_name: z.string(),
     schema_version: z.string(),
     generated_at_utc: z.string(),
     purpose: z.string(),
-    design_notes: z.array(z.string()),
+    design_notes: z.array(z.string()).default([]),
     evidence_tiers: z.record(z.string(), z.unknown()),
-    scale_ladder: z.array(
-      z.object({
-        id: z.string(),
-        label: z.string(),
-        zoom_band: z.array(z.number()).length(2),
-        examples: z.array(z.string())
-      })
-    ),
+    scale_ladder: z.union([rawScaleAxisSchema, z.array(rawLegacyScaleBandSchema)]),
+    kind_catalog: z.array(rawKindCatalogEntrySchema).optional(),
+    nested_link_types: z.array(z.record(z.string(), z.unknown())).optional(),
     entity_catalog: z.array(rawEntitySchema),
+    nested_entity_catalog: z.array(rawNestedLinkSchema).optional(),
     relation_catalog: z.array(rawRelationSchema),
     relation_style_library: z.array(z.record(z.string(), z.unknown())),
     world_model: z.record(z.string(), z.unknown()),
     world_presets: z.array(rawWorldPresetSchema),
-    authoring_hints: z.record(z.string(), z.unknown()),
-    local_first_runtime: z.record(z.string(), z.unknown()),
-    visual_presets: z.array(z.record(z.string(), z.unknown())),
-    temporal_profiles: z.record(z.string(), z.unknown())
+    authoring_hints: z.record(z.string(), z.unknown()).optional(),
+    local_first_runtime: z.record(z.string(), z.unknown()).optional(),
+    visual_presets: z.array(z.record(z.string(), z.unknown())).optional(),
+    temporal_profiles: z.record(z.string(), z.unknown()).optional()
   })
   .passthrough();
 
 export type RawContentBundle = z.infer<typeof rawContentBundleSchema>;
 
-const normalizedScaleSchema = z.object({
-  id: z.string(),
-  canonicalId: z.enum(scaleBandValues),
-  label: z.string(),
-  zoomBand: z.array(z.number()).length(2),
-  order: z.number(),
-  examples: z.array(z.string())
-});
-
 const normalizedParameterSchema = z
   .object({
-    default: z.union([z.number(), z.string(), z.boolean()]).optional(),
+    default: rawPrimitiveSchema.optional(),
     max: z.number().optional(),
     min: z.number().optional(),
+    notes: z.string().optional(),
     status: z.string().optional(),
-    tier: z.string().optional()
+    tier: z.string().optional(),
+    unit: z.string().optional()
   })
   .passthrough();
+
+const organisationScaleSchema = z.object({
+  checkpointId: z.enum(organisationCheckpointIds),
+  position01: z.number(),
+  visiblePlusMinus01: z.number(),
+  visibleRange01: z.tuple([z.number(), z.number()])
+});
+
+const organisationCheckpointSchema = z.object({
+  id: z.enum(organisationCheckpointIds),
+  label: z.string(),
+  value01: z.number(),
+  description: z.string().optional(),
+  examples: z.array(z.string()),
+  sourceIds: z.array(z.string())
+});
+
+const normalizedKindCatalogEntrySchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  branch: z.string(),
+  description: z.string().optional(),
+  organisationBounds01: z.tuple([z.number(), z.number()]).optional(),
+  defaultCheckpointId: z.enum(organisationCheckpointIds),
+  legacyKindAliases: z.array(z.string()),
+  typicalChildKindIds: z.array(z.string()),
+  typicalParentKindIds: z.array(z.string()),
+  primaryNestingLinkType: z.string().optional(),
+  exampleEntityIds: z.array(z.string()),
+  sourceIds: z.array(z.string()),
+  currentEntityCount: z.number()
+});
 
 const normalizedEntitySchema = z.object({
   id: z.string(),
   label: z.string(),
   displayLabel: z.string(),
   kind: z.string(),
-  homeScale: z.enum(scaleBandValues),
   description: z.string().optional(),
-  parts: z.array(z.string()),
   parameters: z.record(z.string(), normalizedParameterSchema),
-  starred: z.boolean()
+  starred: z.boolean(),
+  organisationScale: organisationScaleSchema,
+  legacyScale: z.string().optional(),
+  kindBranch: z.string().optional(),
+  kindScaleBounds01: z.tuple([z.number(), z.number()]).optional(),
+  containsLinkIds: z.array(z.string()),
+  nestedInLinkIds: z.array(z.string()),
+  allowedNestedChildKindIds: z.array(z.string()),
+  allowedContainerKindIds: z.array(z.string()),
+  primaryNestingLinkType: z.string().optional()
+});
+
+const normalizedNestedLinkSchema = z.object({
+  id: z.string(),
+  parent: z.string(),
+  child: z.string(),
+  linkType: z.string(),
+  tier: z.string().optional(),
+  description: z.string().optional(),
+  sourceIds: z.array(z.string())
 });
 
 const normalizedRelationSchema = z.object({
@@ -196,7 +312,8 @@ const normalizedWorldPresetSchema = z.object({
       label: z.string(),
       countDefault: z.number(),
       spatialPattern: z.string(),
-      evidenceTier: z.string().optional()
+      evidenceTier: z.string().optional(),
+      notes: z.string().optional()
     })
   ),
   faunaDefaults: z.array(
@@ -206,7 +323,8 @@ const normalizedWorldPresetSchema = z.object({
       evidenceTier: z.string().optional()
     })
   ),
-  tunableWorldParameters: z.record(z.string(), z.number())
+  tunableWorldParameters: z.record(z.string(), z.number().nullable()),
+  spawnNotes: z.array(z.string())
 });
 
 export const normalizedBundleSchema = z.object({
@@ -216,9 +334,18 @@ export const normalizedBundleSchema = z.object({
     generatedAtUtc: z.string(),
     purpose: z.string()
   }),
-  scaleLadder: z.array(normalizedScaleSchema),
+  organisationAxis: z.object({
+    axisName: z.string(),
+    displayDomain01: z.tuple([z.number(), z.number()]),
+    entityFields: z.record(z.string(), z.string())
+  }),
+  organisationCheckpoints: z.array(organisationCheckpointSchema),
+  kindCatalog: z.array(normalizedKindCatalogEntrySchema),
+  kindIndex: z.record(z.string(), normalizedKindCatalogEntrySchema),
   entities: z.array(normalizedEntitySchema),
   entityIndex: z.record(z.string(), normalizedEntitySchema),
+  nestedLinks: z.array(normalizedNestedLinkSchema),
+  nestedLinkIndex: z.record(z.string(), normalizedNestedLinkSchema),
   relations: z.array(normalizedRelationSchema),
   relationIndex: z.record(z.string(), normalizedRelationSchema),
   relationStyles: z.record(z.string(), z.custom<RelationTrailStyle>()),
@@ -246,6 +373,7 @@ export const normalizedBundleSchema = z.object({
 export type NormalizedBundle = z.infer<typeof normalizedBundleSchema>;
 export type NormalizedEntity = z.infer<typeof normalizedEntitySchema>;
 export type NormalizedRelation = z.infer<typeof normalizedRelationSchema>;
+export type NormalizedNestedLink = z.infer<typeof normalizedNestedLinkSchema>;
 
 const relationTypeToStyleId: Record<string, RelationTrailStyleId> = {
   abiotic_driver: 'signal_plume',
@@ -288,6 +416,31 @@ const relationTypeToStyleId: Record<string, RelationTrailStyleId> = {
   transformation: 'mycelial_diffuse_star',
   water_feedback: 'resource_flow'
 };
+
+const legacyScaleToCheckpoint: Record<string, OrganisationCheckpointId> = {
+  disturbance_regime: 'landscape',
+  guild: 'colony',
+  household_colony: 'colony',
+  landscape: 'landscape',
+  microhabitat: 'part',
+  molecular_signal: 'micro',
+  organ: 'part',
+  organism: 'organism',
+  panarchy: 'systemic',
+  part: 'part',
+  population: 'colony',
+  stand: 'community',
+  systemic: 'systemic',
+  tissue_surface: 'micro'
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 function normalizePathShape(value: unknown): RelationTrailStyle['pathShape'] {
   switch (value) {
@@ -348,7 +501,7 @@ function normalizeAnchorMode(value: unknown): RelationTrailStyle['spawnAnchorMod
 }
 
 function normalizeParameterValue(value: unknown): z.infer<typeof normalizedParameterSchema> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
+  if (isRecord(value)) {
     return rawParameterSchema.parse(value);
   }
 
@@ -356,7 +509,12 @@ function normalizeParameterValue(value: unknown): z.infer<typeof normalizedParam
     return { default: JSON.stringify(value) };
   }
 
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    value === null
+  ) {
     return { default: value };
   }
 
@@ -374,21 +532,39 @@ function coerceNumericValue(value: unknown): number {
     return value;
   }
 
-  if (
-    value &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    'default' in value &&
-    typeof value.default === 'number'
-  ) {
+  if (isRecord(value) && typeof value.default === 'number') {
     return value.default;
   }
 
   return 0;
 }
 
+function coerceNullableNumericValue(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return value;
+  }
+
+  if (isRecord(value)) {
+    if (typeof value.default === 'number') {
+      return value.default;
+    }
+
+    if (value.default === null) {
+      return null;
+    }
+  }
+
+  return value === null ? null : 0;
+}
+
 function coerceNumericRecord(record: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, coerceNumericValue(value)]));
+}
+
+function coerceNullableNumericRecord(record: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [key, coerceNullableNumericValue(value)])
+  );
 }
 
 function normalizeRelationStyles(rawBundle: RawContentBundle): Record<RelationTrailStyleId, RelationTrailStyle> {
@@ -424,6 +600,190 @@ function normalizeRelationStyles(rawBundle: RawContentBundle): Record<RelationTr
   return {
     ...relationTrailStyles,
     ...overrides
+  };
+}
+
+function isStarredLabel(label?: string): boolean {
+  return Boolean(label?.includes('*'));
+}
+
+function isStarredParameterRecord(record?: Record<string, unknown>): boolean {
+  return Object.values(record ?? {}).some(
+    (parameter) =>
+      isRecord(parameter) &&
+      'tier' in parameter &&
+      (parameter as { tier?: unknown }).tier === 'weak_active_starred'
+  );
+}
+
+function resolveOrganisationCheckpointId(value: string | undefined): OrganisationCheckpointId {
+  if (value && (organisationCheckpointIds as readonly string[]).includes(value)) {
+    return value as OrganisationCheckpointId;
+  }
+
+  if (value) {
+    const mapped = legacyScaleToCheckpoint[value];
+    if (mapped) {
+      return mapped;
+    }
+  }
+
+  return 'community';
+}
+
+function normalizeOrganisationAxis(
+  rawScaleLadder: RawContentBundle['scale_ladder']
+): {
+  organisationAxis: NormalizedBundle['organisationAxis'];
+  organisationCheckpoints: OrganisationCheckpoint[];
+} {
+  if (Array.isArray(rawScaleLadder)) {
+    const checkpointsById = new Map<OrganisationCheckpointId, OrganisationCheckpoint>();
+
+    rawScaleLadder.forEach((scale) => {
+      const checkpointId = resolveOrganisationCheckpointId(scale.id);
+      if (checkpointsById.has(checkpointId)) {
+        return;
+      }
+
+      checkpointsById.set(checkpointId, {
+        id: checkpointId,
+        label: scale.label,
+        value01: organisationCheckpointValues[checkpointId],
+        description: undefined,
+        examples: scale.examples ?? [],
+        sourceIds: []
+      });
+    });
+
+    const organisationCheckpoints = organisationCheckpointIds.map(
+      (checkpointId) =>
+        checkpointsById.get(checkpointId) ?? {
+          id: checkpointId,
+          label: checkpointId,
+          value01: organisationCheckpointValues[checkpointId],
+          description: undefined,
+          examples: [],
+          sourceIds: []
+        }
+    );
+
+    return {
+      organisationAxis: {
+        axisName: 'organisation_scale_0_1',
+        displayDomain01: [0.02, 0.98],
+        entityFields: {
+          nearest_checkpoint_field: 'scale',
+          legacy_checkpoint_field: 'legacy_scale',
+          position_field: 'organisation_scale.position_0_1',
+          visible_plus_minus_field: 'organisation_scale.visible_plus_minus_0_1',
+          visible_range_field: 'organisation_scale.visible_range_0_1'
+        }
+      },
+      organisationCheckpoints
+    };
+  }
+
+  return {
+    organisationAxis: {
+      axisName: rawScaleLadder.axis_name,
+      displayDomain01: rawScaleLadder.display_domain_0_1 ?? [0.02, 0.98],
+      entityFields: rawScaleLadder.entity_fields ?? {
+        nearest_checkpoint_field: 'scale',
+        legacy_checkpoint_field: 'legacy_scale',
+        position_field: 'organisation_scale.position_0_1',
+        visible_plus_minus_field: 'organisation_scale.visible_plus_minus_0_1',
+        visible_range_field: 'organisation_scale.visible_range_0_1'
+      }
+    },
+    organisationCheckpoints: rawScaleLadder.checkpoints.map((checkpoint) => ({
+      id: resolveOrganisationCheckpointId(checkpoint.id),
+      label: checkpoint.label,
+      value01:
+        typeof checkpoint.value_0_1 === 'number'
+          ? checkpoint.value_0_1
+          : organisationCheckpointValues[resolveOrganisationCheckpointId(checkpoint.id)],
+      description: checkpoint.description,
+      examples: checkpoint.examples ?? [],
+      sourceIds: checkpoint.source_ids ?? []
+    }))
+  };
+}
+
+function normalizeOrganisationScale(
+  entity: RawContentBundle['entity_catalog'][number],
+  axisDisplayDomain: [number, number]
+): OrganisationScale {
+  const checkpointId = resolveOrganisationCheckpointId(entity.organisation_scale?.checkpoint_id ?? entity.scale);
+
+  if (entity.organisation_scale) {
+    return {
+      checkpointId,
+      position01: entity.organisation_scale.position_0_1,
+      visiblePlusMinus01: entity.organisation_scale.visible_plus_minus_0_1,
+      visibleRange01: entity.organisation_scale.visible_range_0_1
+    };
+  }
+
+  const position01 = organisationCheckpointValues[checkpointId];
+  const visiblePlusMinus01 = checkpointId === 'part' || checkpointId === 'organism' ? 0.12 : 0.14;
+
+  return {
+    checkpointId,
+    position01,
+    visiblePlusMinus01,
+    visibleRange01: [
+      clamp(position01 - visiblePlusMinus01, axisDisplayDomain[0], axisDisplayDomain[1]),
+      clamp(position01 + visiblePlusMinus01, axisDisplayDomain[0], axisDisplayDomain[1])
+    ]
+  };
+}
+
+function normalizeKindCatalog(
+  rawBundle: RawContentBundle
+): {
+  kindCatalog: KindCatalogEntry[];
+  kindIndex: Record<string, KindCatalogEntry>;
+} {
+  const kindCatalog = (rawBundle.kind_catalog ?? []).map((kind) => ({
+    id: kind.id,
+    label: kind.label,
+    branch: kind.branch,
+    description: kind.description,
+    organisationBounds01: kind.organisation_bounds_0_1,
+    defaultCheckpointId: resolveOrganisationCheckpointId(kind.default_checkpoint_id),
+    legacyKindAliases: kind.legacy_kind_aliases ?? [],
+    typicalChildKindIds: kind.typical_child_kind_ids ?? [],
+    typicalParentKindIds: kind.typical_parent_kind_ids ?? [],
+    primaryNestingLinkType: kind.primary_nesting_link_type,
+    exampleEntityIds: kind.example_entity_ids ?? [],
+    sourceIds: kind.source_ids ?? [],
+    currentEntityCount: kind.current_entity_count ?? 0
+  }));
+
+  return {
+    kindCatalog,
+    kindIndex: Object.fromEntries(kindCatalog.map((kind) => [kind.id, kind]))
+  };
+}
+
+function normalizeNestedLinks(rawBundle: RawContentBundle): {
+  nestedLinks: NestedEntityLink[];
+  nestedLinkIndex: Record<string, NestedEntityLink>;
+} {
+  const nestedLinks = (rawBundle.nested_entity_catalog ?? []).map((link) => ({
+    id: link.id,
+    parent: link.parent,
+    child: link.child,
+    linkType: link.link_type ?? link.type ?? 'member',
+    tier: link.tier,
+    description: link.description,
+    sourceIds: link.source_ids ?? []
+  }));
+
+  return {
+    nestedLinks,
+    nestedLinkIndex: Object.fromEntries(nestedLinks.map((link) => [link.id, link]))
   };
 }
 
@@ -473,21 +833,6 @@ function extractPatchTargets(rawBundle: RawContentBundle): PatchTarget[] {
   return targets;
 }
 
-function isStarredLabel(label?: string): boolean {
-  return Boolean(label?.includes('*'));
-}
-
-function isStarredParameterRecord(record?: Record<string, unknown>): boolean {
-  return Object.values(record ?? {}).some(
-    (parameter) =>
-      parameter !== null &&
-      typeof parameter === 'object' &&
-      !Array.isArray(parameter) &&
-      'tier' in parameter &&
-      (parameter as { tier?: unknown }).tier === 'weak_active_starred'
-  );
-}
-
 export function resolveRelationStyleId(type: string): RelationTrailStyleId {
   const resolved = relationTypeToStyleId[type];
 
@@ -501,18 +846,31 @@ export function resolveRelationStyleId(type: string): RelationTrailStyleId {
 export function normalizeBundle(rawInput: unknown): NormalizedBundle {
   const rawBundle = rawContentBundleSchema.parse(rawInput);
   const relationStyles = normalizeRelationStyles(rawBundle);
+  const { organisationAxis, organisationCheckpoints } = normalizeOrganisationAxis(rawBundle.scale_ladder);
+  const { kindCatalog, kindIndex } = normalizeKindCatalog(rawBundle);
+  const { nestedLinks, nestedLinkIndex } = normalizeNestedLinks(rawBundle);
 
-  const entities = rawBundle.entity_catalog.map((entity) => ({
-    id: entity.id,
-    label: entity.label ?? entity.id,
-    displayLabel: entity.display_label ?? entity.label ?? entity.id,
-    kind: entity.kind,
-    homeScale: canonicalizeScaleBand(entity.scale),
-    description: entity.description,
-    parts: entity.parts ?? [],
-    parameters: normalizeParameterRecord(entity.parameters),
-    starred: isStarredLabel(entity.display_label) || isStarredParameterRecord(entity.parameters)
-  }));
+  const entities = rawBundle.entity_catalog.map((entity) => {
+    const kind = kindIndex[entity.kind];
+    return {
+      id: entity.id,
+      label: entity.label ?? entity.id,
+      displayLabel: entity.display_label ?? entity.label ?? entity.id,
+      kind: entity.kind,
+      description: entity.description,
+      parameters: normalizeParameterRecord(entity.parameters),
+      starred: isStarredLabel(entity.display_label) || isStarredParameterRecord(entity.parameters),
+      organisationScale: normalizeOrganisationScale(entity, organisationAxis.displayDomain01),
+      legacyScale: entity.legacy_scale,
+      kindBranch: entity.kind_branch ?? kind?.branch,
+      kindScaleBounds01: entity.kind_scale_bounds_0_1 ?? kind?.organisationBounds01,
+      containsLinkIds: entity.contains_link_ids ?? [],
+      nestedInLinkIds: entity.nested_in_link_ids ?? [],
+      allowedNestedChildKindIds: entity.allowed_nested_child_kind_ids ?? kind?.typicalChildKindIds ?? [],
+      allowedContainerKindIds: entity.allowed_container_kind_ids ?? kind?.typicalParentKindIds ?? [],
+      primaryNestingLinkType: entity.primary_nesting_link_type ?? kind?.primaryNestingLinkType
+    };
+  });
 
   const entityIndex = Object.fromEntries(entities.map((entity) => [entity.id, entity]));
 
@@ -544,19 +902,6 @@ export function normalizeBundle(rawInput: unknown): NormalizedBundle {
 
   const relationIndex = Object.fromEntries(relations.map((relation) => [relation.id, relation]));
 
-  const scaleLadder = rawBundle.scale_ladder.map((scale, index) => {
-    const canonicalId = canonicalizeScaleBand(scale.id);
-
-    return {
-      id: scale.id,
-      canonicalId,
-      label: scale.label,
-      zoomBand: scale.zoom_band,
-      order: index,
-      examples: scale.examples
-    };
-  });
-
   const worldModel = {
     plotExtentM: {
       x: Number((rawBundle.world_model.plot_extent_m as { x?: number })?.x ?? 100),
@@ -578,21 +923,23 @@ export function normalizeBundle(rawInput: unknown): NormalizedBundle {
       entityId: preset.hero_tree.entity_id,
       count: preset.hero_tree.count,
       position: preset.hero_tree.position_m,
-      instanceParameterOverrides: preset.hero_tree.instance_parameter_overrides ?? {}
+      instanceParameterOverrides: normalizeParameterRecord(preset.hero_tree.instance_parameter_overrides)
     },
     cohortDefaults: preset.cohort_defaults.map((item) => ({
       entityId: item.entity_id,
       label: item.label,
       countDefault: item.count_default,
       spatialPattern: item.spatial_pattern,
-      evidenceTier: item.evidence_tier
+      evidenceTier: item.evidence_tier,
+      notes: item.notes
     })),
     faunaDefaults: preset.fauna_defaults.map((item) => ({
       entityId: item.entity_id,
       countDefault: item.count_default,
       evidenceTier: item.evidence_tier
     })),
-    tunableWorldParameters: coerceNumericRecord(preset.tunable_world_parameters)
+    tunableWorldParameters: coerceNullableNumericRecord(preset.tunable_world_parameters),
+    spawnNotes: preset.spawn_notes ?? []
   }));
 
   return normalizedBundleSchema.parse({
@@ -602,9 +949,14 @@ export function normalizeBundle(rawInput: unknown): NormalizedBundle {
       generatedAtUtc: rawBundle.generated_at_utc,
       purpose: rawBundle.purpose
     },
-    scaleLadder,
+    organisationAxis,
+    organisationCheckpoints,
+    kindCatalog,
+    kindIndex,
     entities,
     entityIndex,
+    nestedLinks,
+    nestedLinkIndex,
     relations,
     relationIndex,
     relationStyles,

@@ -2,8 +2,9 @@
 
 import { type MouseEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 
-import { relationTrailStyleIds, type FrameSnapshot, type SelectionOverlay } from '@ecology/domain';
+import { relationTrailStyleIds, type FrameSnapshot, type SelectionOverlay, type WorldViewMode } from '@ecology/domain';
 import type { NormalizedBundle, RawContentBundle } from '@ecology/schema';
+import { renderPointBudgetPresets, type RenderVisualSettings } from '@ecology/worker-runtime';
 
 export type PanelId = 'simulation' | 'world' | 'inspector' | 'ecology' | 'visuals';
 export interface PanelState {
@@ -16,6 +17,13 @@ export interface VisualControlState {
   holarchyDepth: number;
   lockCameraZoom: boolean;
   lockHolarchyDepth: boolean;
+  pointBudgetPreset: RenderVisualSettings['pointBudgetPreset'];
+  maxPoints: number;
+  dofMode: RenderVisualSettings['dofMode'];
+  focusDistance: number;
+  focusLock: RenderVisualSettings['focusLock'];
+  glowMode: RenderVisualSettings['glowMode'];
+  transparencyMode: RenderVisualSettings['transparencyMode'];
 }
 
 interface NumberFieldProps {
@@ -60,8 +68,10 @@ interface ControlPanelProps {
   snapshot?: FrameSnapshot;
   status: string;
   visuals: VisualControlState;
+  worldViewMode: WorldViewMode;
   onAdvanceDay(): void;
   onChangeVisuals(nextVisuals: Partial<VisualControlState>): void;
+  onChangeWorldMode(nextViewMode: WorldViewMode): void;
   onExport(): void;
   onImport(file: File): void;
   onPatch(path: (string | number)[], nextValue: unknown, label: string): void;
@@ -344,8 +354,10 @@ export function ControlPanel({
   snapshot,
   status,
   visuals,
+  worldViewMode,
   onAdvanceDay,
   onChangeVisuals,
+  onChangeWorldMode,
   onExport,
   onImport,
   onPatch,
@@ -410,7 +422,9 @@ export function ControlPanel({
     typeof selectedEntityRaw?.kind === 'string'
       ? selectedEntityRaw.kind
       : selectedEntity?.kind;
-  const selectedEntityScale = selectedEntity?.homeScale;
+  const selectedEntityScale = selectedEntity?.organisationScale.checkpointId;
+  const selectedEntityPosition = selectedEntity?.organisationScale.position01;
+  const selectedEntityVisibleRange = selectedEntity?.organisationScale.visibleRange01;
   const selectedRelationTier = selectedRelation?.evidenceTier ?? (
     typeof selectedRelationRaw?.evidence_tier_override === 'string' ? selectedRelationRaw.evidence_tier_override : undefined
   );
@@ -454,11 +468,14 @@ export function ControlPanel({
         : rawBundle.design_notes.slice(0, 3);
   const anchorInfoCards = selection?.kind === 'anchor'
     ? [
-        { label: 'Type', value: humanizeToken(selectedEntityKind ?? selection.kind) || 'Unknown' },
-        { label: 'Scale', value: humanizeToken(selectedEntityScale) || 'Unknown' },
+        { label: 'Organisation checkpoint', value: humanizeToken(selectedEntityScale) || 'Unknown' },
+        { label: 'Organisation position', value: typeof selectedEntityPosition === 'number' ? selectedEntityPosition.toFixed(2) : 'Unknown' },
+        {
+          label: 'Visible range',
+          value: selectedEntityVisibleRange ? `${selectedEntityVisibleRange[0].toFixed(2)} - ${selectedEntityVisibleRange[1].toFixed(2)}` : 'Unknown'
+        },
+        { label: 'Legacy scale', value: humanizeToken(selectedEntity?.legacyScale) || 'None' },
         { label: 'Linked relations', value: String(connectedRelationCount) },
-        { label: 'Fixed in world', value: selection.details?.fixedInWorld ? 'Yes' : 'No' },
-        { label: 'Voxel chunks', value: String(selection.details?.voxelCount ?? 0) },
         ...(selectedAnchorLabel ? [{ label: 'Scene anchor', value: selectedAnchorLabel }] : [])
       ]
     : [];
@@ -536,11 +553,34 @@ export function ControlPanel({
         )
       );
   }, [bundle, directRelations, selectedEntityId, selectedRelation, selection]);
+  const directNestedChildren = useMemo(
+    () =>
+      selectedEntityId
+        ? bundle.nestedLinks.filter((link) => link.parent === selectedEntityId)
+        : [],
+    [bundle.nestedLinks, selectedEntityId]
+  );
+  const directNestedParents = useMemo(
+    () =>
+      selectedEntityId
+        ? bundle.nestedLinks.filter((link) => link.child === selectedEntityId)
+        : [],
+    [bundle.nestedLinks, selectedEntityId]
+  );
+  const selectedEntityTypeDetails = selection?.kind === 'anchor'
+    ? [
+        {
+          label: 'Type',
+          value: humanizeToken(selectedEntityKind ?? selection.kind) || 'Unknown'
+        },
+        ...(selectedEntity?.kindBranch ? [{ label: 'Branch', value: humanizeToken(selectedEntity.kindBranch) }] : [])
+      ]
+    : [];
 
   return (
     <aside className="control-panel">
       <PanelDrawer
-        copy="Advance the ecological clocks, reseed the one-hectare patch, and trigger disturbances without leaving the full-screen world."
+        copy="Advance the ecological clocks, reseed the current world mode, and trigger disturbances without leaving the full-screen scene."
         eyebrow="Runtime"
         isOpen={panelStates.simulation.open}
         isPinned={panelStates.simulation.pinned}
@@ -555,6 +595,7 @@ export function ControlPanel({
         <div className="section">
           <div className="button-row">
             <span className="badge">Renderer: {backendLabel}</span>
+            <span className="badge">World: {worldViewMode === 'tuning_standard' ? 'Standard tuning' : 'Hectare patch'}</span>
             <span className="badge">Selection: {formatSelectionLabel(selection)}</span>
           </div>
           <p className="status-line">{status}</p>
@@ -619,7 +660,7 @@ export function ControlPanel({
       </PanelDrawer>
 
       <PanelDrawer
-        copy="Tune the canonical old-growth preset. These values regenerate the spatial distribution while keeping the local-first JSON model intact."
+        copy="Switch between the compact one-of-each tuning scene and the hectare comparison view, then tune the canonical old-growth preset values."
         eyebrow="Patch defaults"
         isOpen={panelStates.world.open}
         isPinned={panelStates.world.pinned}
@@ -632,11 +673,20 @@ export function ControlPanel({
         onToggle={onTogglePanel}
       >
         <div className="section">
+          <div className="field-card field">
+            <label>World mode</label>
+            <select value={worldViewMode} onChange={(event) => onChangeWorldMode(event.target.value as WorldViewMode)}>
+              <option value="tuning_standard">Standard tuning scene</option>
+              <option value="hectare_patch">Hectare patch</option>
+            </select>
+          </div>
+        </div>
+        <div className="section">
           <div className="field-grid">
             {Object.entries(worldPreset.tunable_world_parameters).map(([key, value]) => (
               <NumberField
                 key={key}
-                label={key}
+                label={humanizeToken(key)}
                 value={readNumericValue(value)}
                 onCommit={(nextValue) =>
                   onPatch(['world_presets', 0, 'tunable_world_parameters', key, 'default'], nextValue, `Update ${key}`)
@@ -648,7 +698,7 @@ export function ControlPanel({
       </PanelDrawer>
 
       <PanelDrawer
-        copy="Click a transparent voxel box or particle trail field to inspect it. Weak links only reveal their star in text and metadata."
+        copy="Click a point-cloud entity or transfer particle stream to inspect it. Weak links only reveal their star in text and metadata."
         eyebrow="Inspection"
         isOpen={panelStates.inspector.open}
         isPinned={panelStates.inspector.pinned}
@@ -779,6 +829,19 @@ export function ControlPanel({
         onToggle={onTogglePanel}
       >
         <div className="section ecology-body">
+          {selectedEntityTypeDetails.length > 0 ? (
+            <div className="ecology-block">
+              <div className="metric-grid">
+                {selectedEntityTypeDetails.map((item) => (
+                  <div key={item.label} className="metric-card">
+                    <span className="metric-label">{item.label}</span>
+                    <span className="metric-value">{item.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div className="ecology-block">
             <h3>Ecology info</h3>
             <p className="panel-copy ecology-text">{ecologyDescription}</p>
@@ -798,9 +861,9 @@ export function ControlPanel({
           ) : null}
         </div>
 
-        {ecologyInfoCards.length > 0 ? (
+        {selection?.kind === 'anchor' && ecologyInfoCards.length > 0 ? (
           <div className="section">
-            <h3>Relations and scale</h3>
+            <h3>Organisation scale</h3>
             <div className="metric-grid">
               {ecologyInfoCards.map((item) => (
                 <div key={item.label} className="metric-card">
@@ -812,9 +875,73 @@ export function ControlPanel({
           </div>
         ) : null}
 
+        {selection?.kind === 'relation' && ecologyInfoCards.length > 0 ? (
+          <div className="section">
+            <h3>Relation details</h3>
+            <div className="metric-grid">
+              {ecologyInfoCards.map((item) => (
+                <div key={item.label} className="metric-card">
+                  <span className="metric-label">{item.label}</span>
+                  <span className="metric-value">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {selection?.kind === 'anchor' ? (
+          <div className="section">
+            <h3>Nesting</h3>
+            {directNestedParents.length > 0 || directNestedChildren.length > 0 ? (
+              <ul className="relation-list">
+                {directNestedParents.map((link) => (
+                  <li key={link.id} className="relation-card relation-card--context">
+                    <strong>{bundle.entityIndex[link.parent]?.displayLabel ?? humanizeToken(link.parent)}</strong>
+                    <span className="relation-meta">Contains this feature</span>
+                    <span className="relation-meta">{humanizeToken(link.linkType)}</span>
+                  </li>
+                ))}
+                {directNestedChildren.map((link) => (
+                  <li key={link.id} className="relation-card">
+                    <strong>{bundle.entityIndex[link.child]?.displayLabel ?? humanizeToken(link.child)}</strong>
+                    <span className="relation-meta">Nested within this feature</span>
+                    <span className="relation-meta">{humanizeToken(link.linkType)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-state">No direct nesting links were found for this selection.</p>
+            )}
+          </div>
+        ) : null}
+
+        {selection?.kind === 'anchor' && selectedEntity ? (
+          <div className="section">
+            <h3>Allowed nesting</h3>
+            <div className="metric-grid">
+              <div className="metric-card">
+                <span className="metric-label">Allowed containers</span>
+                <span className="metric-value">
+                  {selectedEntity.allowedContainerKindIds.length > 0
+                    ? selectedEntity.allowedContainerKindIds.map(humanizeToken).join(', ')
+                    : 'None listed'}
+                </span>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">Allowed children</span>
+                <span className="metric-value">
+                  {selectedEntity.allowedNestedChildKindIds.length > 0
+                    ? selectedEntity.allowedNestedChildKindIds.map(humanizeToken).join(', ')
+                    : 'None listed'}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {selection ? (
           <div className="section">
-            <h3>Direct relations</h3>
+            <h3>Direct ecological relations</h3>
             {directRelations.length > 0 ? (
               <ul className="relation-list">
                 {directRelations.map((relation) => (
@@ -876,8 +1003,12 @@ export function ControlPanel({
                 <span className="metric-value">{bundle.relations.length}</span>
               </div>
               <div className="metric-card">
-                <span className="metric-label">Scale bands</span>
-                <span className="metric-value">{bundle.scaleLadder.length}</span>
+                <span className="metric-label">Organisation checkpoints</span>
+                <span className="metric-value">{bundle.organisationCheckpoints.length}</span>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">Nested links</span>
+                <span className="metric-value">{bundle.nestedLinks.length}</span>
               </div>
               <div className="metric-card">
                 <span className="metric-label">Starred links</span>
@@ -915,7 +1046,7 @@ export function ControlPanel({
       </PanelDrawer>
 
       <PanelDrawer
-        copy="Tune the camera zoom and semantic holarchy depth together or separately. Mouse-wheel zoom updates both unless one is locked."
+        copy="Tune the point budget, focus plane, DOF, glow, and transparency. Mouse-wheel zoom still couples camera zoom and holarchy depth unless one is locked."
         eyebrow="Render controls"
         isOpen={panelStates.visuals.open}
         isPinned={panelStates.visuals.pinned}
@@ -941,6 +1072,99 @@ export function ControlPanel({
             onChange={(holarchyDepth) => onChangeVisuals({ holarchyDepth })}
             locked={visuals.lockHolarchyDepth}
             onToggleLock={() => onChangeVisuals({ lockHolarchyDepth: !visuals.lockHolarchyDepth })}
+          />
+        </div>
+        <div className="section">
+          <div className="field-inline">
+            <div className="field-card field">
+              <label>Point budget preset</label>
+              <select
+                value={visuals.pointBudgetPreset}
+                onChange={(event) =>
+                  onChangeVisuals({
+                    pointBudgetPreset: event.target.value as VisualControlState['pointBudgetPreset']
+                  })
+                }
+              >
+                {renderPointBudgetPresets.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {humanizeToken(preset)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <NumberField
+              label="Max points"
+              value={visuals.maxPoints}
+              onCommit={(maxPoints) => onChangeVisuals({ maxPoints: Math.max(16_384, Math.round(maxPoints)) })}
+            />
+          </div>
+          <div className="field-inline">
+            <div className="field-card field">
+              <label>DOF mode</label>
+              <select
+                value={visuals.dofMode}
+                onChange={(event) =>
+                  onChangeVisuals({
+                    dofMode: event.target.value as VisualControlState['dofMode']
+                  })
+                }
+              >
+                <option value="off">Off</option>
+                <option value="shader">Shader DOF</option>
+                <option value="bokeh">Bokeh pass</option>
+              </select>
+            </div>
+            <div className="field-card field">
+              <label>Glow mode</label>
+              <select
+                value={visuals.glowMode}
+                onChange={(event) =>
+                  onChangeVisuals({
+                    glowMode: event.target.value as VisualControlState['glowMode']
+                  })
+                }
+              >
+                <option value="off">Off</option>
+                <option value="halo">Halo</option>
+                <option value="bloom">Bloom</option>
+              </select>
+            </div>
+          </div>
+          <div className="field-inline">
+            <div className="field-card field">
+              <label>Focus lock</label>
+              <select
+                value={visuals.focusLock}
+                onChange={(event) =>
+                  onChangeVisuals({
+                    focusLock: event.target.value as VisualControlState['focusLock']
+                  })
+                }
+              >
+                <option value="camera">Camera distance</option>
+                <option value="selection">Selected item</option>
+              </select>
+            </div>
+            <div className="field-card field">
+              <label>Transparency</label>
+              <select
+                value={visuals.transparencyMode}
+                onChange={(event) =>
+                  onChangeVisuals({
+                    transparencyMode: event.target.value as VisualControlState['transparencyMode']
+                  })
+                }
+              >
+                <option value="solid_core">Solid core</option>
+                <option value="soft_alpha">Soft alpha</option>
+              </select>
+            </div>
+          </div>
+          <NumberField
+            label="Focus distance"
+            value={visuals.focusDistance}
+            onCommit={(focusDistance) => onChangeVisuals({ focusDistance: Math.max(1, focusDistance) })}
           />
         </div>
       </PanelDrawer>

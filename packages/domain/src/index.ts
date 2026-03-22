@@ -1,40 +1,71 @@
-export const scaleBandValues = [
-  'molecular_signal',
-  'tissue_surface',
-  'microhabitat',
+export const organisationCheckpointIds = [
+  'micro',
+  'macro',
   'part',
   'organism',
-  'household_colony',
-  'stand',
+  'colony',
+  'community',
   'landscape',
-  'panarchy'
+  'systemic'
 ] as const;
 
-export type ScaleBand = (typeof scaleBandValues)[number];
+export type OrganisationCheckpointId = (typeof organisationCheckpointIds)[number];
 
-export const scaleAliasMap = {
-  disturbance_regime: 'landscape',
-  guild: 'household_colony',
-  organ: 'part',
-  population: 'household_colony'
-} as const satisfies Record<string, ScaleBand>;
-
-export const scaleBandOrder = new Map<ScaleBand, number>(
-  scaleBandValues.map((band, index) => [band, index])
+export const organisationCheckpointOrder = new Map<OrganisationCheckpointId, number>(
+  organisationCheckpointIds.map((checkpoint, index) => [checkpoint, index])
 );
 
-export function canonicalizeScaleBand(scale: string): ScaleBand {
-  if ((scaleBandValues as readonly string[]).includes(scale)) {
-    return scale as ScaleBand;
-  }
+export const organisationCheckpointValues: Record<OrganisationCheckpointId, number> = {
+  micro: 0.06,
+  macro: 0.16,
+  part: 0.29,
+  organism: 0.44,
+  colony: 0.57,
+  community: 0.7,
+  landscape: 0.84,
+  systemic: 0.95
+};
 
-  const mapped = scaleAliasMap[scale as keyof typeof scaleAliasMap];
+export interface OrganisationScale {
+  checkpointId: OrganisationCheckpointId;
+  position01: number;
+  visiblePlusMinus01: number;
+  visibleRange01: [number, number];
+}
 
-  if (!mapped) {
-    throw new Error(`Unknown scale band: ${scale}`);
-  }
+export interface OrganisationCheckpoint {
+  id: OrganisationCheckpointId;
+  label: string;
+  value01: number;
+  description?: string;
+  examples: string[];
+  sourceIds: string[];
+}
 
-  return mapped;
+export interface KindCatalogEntry {
+  id: string;
+  label: string;
+  branch: string;
+  description?: string;
+  organisationBounds01?: [number, number];
+  defaultCheckpointId: OrganisationCheckpointId;
+  legacyKindAliases: string[];
+  typicalChildKindIds: string[];
+  typicalParentKindIds: string[];
+  primaryNestingLinkType?: string;
+  exampleEntityIds: string[];
+  sourceIds: string[];
+  currentEntityCount: number;
+}
+
+export interface NestedEntityLink {
+  id: string;
+  parent: string;
+  child: string;
+  linkType: string;
+  tier?: string;
+  description?: string;
+  sourceIds: string[];
 }
 
 export const relationTrailStyleIds = [
@@ -171,6 +202,10 @@ export const relationTrailStyles: Record<RelationTrailStyleId, RelationTrailStyl
 
 export type DisturbanceType = 'wildfire' | 'drought' | 'logging' | 'parameter_shock';
 
+export type WorldViewMode = 'tuning_standard' | 'hectare_patch';
+
+export type AnchorRenderClass = 'physical_wireframe' | 'bounded_translucent' | 'diffuse_overlay';
+
 export interface SurfaceAnchor {
   id: string;
   mode: AnchorMode;
@@ -185,12 +220,16 @@ export interface SpatialAnchor {
   position: [number, number, number];
   rotation?: [number, number, number, number];
   boundsAabb: [number, number, number, number, number, number];
-  homeScale: ScaleBand;
   fixedInWorld: boolean;
   occupancyVoxels: number[];
   surfaceAnchors?: SurfaceAnchor[];
   starred: boolean;
   evidenceTier?: string;
+  renderClass: AnchorRenderClass;
+  organisationScale: OrganisationScale;
+  legacyScale?: string;
+  hostAnchorId?: string | null;
+  nestedParentAnchorId?: string | null;
 }
 
 export interface GeneratedRelationCorridor {
@@ -207,6 +246,7 @@ export interface GeneratedRelationCorridor {
 export interface WorldSeedConfig {
   seed: number;
   presetId: string;
+  viewMode: WorldViewMode;
   generationOverrides?: Record<string, number>;
   scenarioToggles?: Partial<Record<DisturbanceType, boolean>>;
 }
@@ -232,12 +272,19 @@ export interface SimulationMetrics {
 export interface FrameSnapshot {
   revision: number;
   worldSeed: number;
+  viewMode: WorldViewMode;
   anchorIds: string[];
   anchorEntityTypes: string[];
   anchorLabels: string[];
   anchorKinds: string[];
   anchorStarred: boolean[];
   anchorFixed: boolean[];
+  anchorRenderClasses: AnchorRenderClass[];
+  anchorOrganisationPositions: number[];
+  anchorOrganisationCheckpoints: OrganisationCheckpointId[];
+  anchorLegacyScales: string[];
+  anchorHostAnchorIds: (string | null)[];
+  anchorNestedParentAnchorIds: (string | null)[];
   positions: Float32Array;
   sizes: Float32Array;
   colors: Float32Array;
@@ -248,6 +295,7 @@ export interface FrameSnapshot {
   relationStarred: boolean[];
   relationSourceAnchorIds: string[];
   relationTargetAnchorIds: string[];
+  worldBounds: [number, number, number, number, number, number];
   metrics: SimulationMetrics;
 }
 

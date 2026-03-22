@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository currently holds the product definition in `PDR.md`, the implementation blueprint in `CodeBase.md`, the canonical content bundle in `large_old_eucalypt_content_layer_v3.json`, and supporting literature in `Data/`. Planned application work should follow the monorepo shape described in `CodeBase.md`: `web/` for the Next.js shell and `packages/` for shared modules such as `domain`, `schema`, `sim-core`, `scene3d`, `authoring`, `storage`, and `worker-runtime`.
+This repository currently holds the product definition in `PDR.md`, the implementation blueprint in `CodeBase.md`, the canonical content bundle in `large_old_eucalypt_content_layer_v4.json`, and supporting literature in `Data/`. Planned application work should follow the monorepo shape described in `CodeBase.md`: `web/` for the Next.js shell and `packages/` for shared modules such as `domain`, `schema`, `sim-core`, `scene3d`, `authoring`, `storage`, and `worker-runtime`.
 
 ## Build, Test, and Development Commands
 Use `pnpm` for workspace tasks once the app scaffold lands. Expected commands are `pnpm install` to install workspace dependencies, `pnpm dev` to start the local app on `http://localhost:3000`, `pnpm build` for a production build, `pnpm test` for automated checks, and `pnpm lint` for static analysis. Keep command names stable at the workspace root so editor tooling and CI can rely on them.

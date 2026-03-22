@@ -13,10 +13,14 @@ describe('normalizeBundle', () => {
   it('normalizes scales, styles, and lookups for the runtime', () => {
     const normalized = normalizeBundle(rawMountainAshBundle);
 
-    expect(normalized.entities.every((entity) => entity.homeScale)).toBe(true);
+    expect(normalized.entities.every((entity) => entity.organisationScale.checkpointId)).toBe(true);
+    expect(normalized.entities.every((entity) => typeof entity.organisationScale.position01 === 'number')).toBe(true);
     expect(normalized.relations.every((relation) => relation.styleId)).toBe(true);
     expect(normalized.relations.every((relation) => relation.from in normalized.entityIndex)).toBe(true);
     expect(normalized.relations.every((relation) => relation.to in normalized.entityIndex)).toBe(true);
+    expect(normalized.nestedLinks.every((link) => link.parent in normalized.entityIndex)).toBe(true);
+    expect(normalized.nestedLinks.every((link) => link.child in normalized.entityIndex)).toBe(true);
+    expect(normalized.organisationCheckpoints.length).toBeGreaterThan(4);
     expect(normalized.patchTargets.length).toBeGreaterThan(10);
   });
 });

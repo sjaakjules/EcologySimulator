@@ -11,7 +11,7 @@ export default tseslint.config(
       'coverage/**',
       'dist/**',
       'node_modules/**',
-      'packages/content/mountain-ash/large_old_eucalypt_content_layer_v3.json'
+      'packages/content/mountain-ash/large_old_eucalypt_content_layer_v4.json'
     ]
   },
   js.configs.recommended,

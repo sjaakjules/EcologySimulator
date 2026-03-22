@@ -13,8 +13,12 @@ self.onmessage = async (event: MessageEvent<RenderCommand>) => {
       runtime = new EcologySceneRuntime(
         command.canvas,
         (selection) => postMessage({ type: 'PickResult', selection } satisfies RenderEvent),
-        (backend) => postMessage({ type: 'RendererReady', backend } satisfies RenderEvent),
-        (selection) => postMessage({ type: 'HoverResult', selection } satisfies RenderEvent)
+        (capabilities) =>
+          postMessage({ type: 'RendererReady', backend: capabilities.backend, capabilities } satisfies RenderEvent),
+        (selection) => postMessage({ type: 'HoverResult', selection } satisfies RenderEvent),
+        (stats) => postMessage({ type: 'RendererStats', stats } satisfies RenderEvent),
+        (message) => postMessage({ type: 'Log', message } satisfies RenderEvent),
+        'worker'
       );
       await runtime.init(command.width, command.height, command.dpr);
       runtime.setBundle(command.bundle);

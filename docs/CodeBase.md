@@ -128,7 +128,7 @@ interface SpatialAnchor {
   position: [number, number, number];
   rotation?: [number, number, number, number];
   boundsAabb: [number, number, number, number, number, number];
-  homeScale: ScaleBand;
+  organisationScale: OrganisationScale;
   fixedInWorld: boolean;
   occupancyVoxels: number[];
   surfaceAnchors?: SurfaceAnchor[];
@@ -429,7 +429,7 @@ Use:
 
 ## 10.3 Budget targets
 
-Default 1 ha patch target:
+Default tuning/hectare performance target:
 
 - `60 fps` desktop
 - `30 fps` integrated GPU minimum
@@ -474,7 +474,7 @@ mountain-ash-holarchy/
     worker-runtime/
     content/
       mountain-ash/
-        large_old_eucalypt_content_layer_v3.json
+        large_old_eucalypt_content_layer_v4.json
   docs/
     PDR.md
     CodeBase.md
@@ -558,5 +558,5 @@ This revision explicitly commits to:
 - **spatially faithful world coordinates**,
 - **adaptive voxels of different sizes**,
 - **particle trails with style grammar**,
-- **1 ha old-growth default preset**,
+- **standard one-of-each tuning scene with hectare alternate**,
 - **local-first / local-only MVP**.

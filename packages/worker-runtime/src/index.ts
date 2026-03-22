@@ -8,8 +8,47 @@ import type {
 } from '@ecology/domain';
 import type { NormalizedBundle } from '@ecology/schema';
 
+export const renderPointBudgetPresets = ['preview', 'balanced', 'dense', 'million'] as const;
+export type RenderPointBudgetPreset = (typeof renderPointBudgetPresets)[number];
+
+export type RenderDofMode = 'off' | 'shader' | 'bokeh';
+export type RenderFocusLock = 'camera' | 'selection';
+export type RenderGlowMode = 'off' | 'halo' | 'bloom';
+export type RenderTransparencyMode = 'solid_core' | 'soft_alpha';
+
 export interface RenderVisualSettings {
+  cameraZoom: number;
   holarchyDepth: number;
+  pointBudgetPreset: RenderPointBudgetPreset;
+  maxPoints: number;
+  dofMode: RenderDofMode;
+  focusDistance: number;
+  focusLock: RenderFocusLock;
+  glowMode: RenderGlowMode;
+  transparencyMode: RenderTransparencyMode;
+}
+
+export interface RendererCapabilities {
+  backend: 'webgpu' | 'webgl';
+  webgl2: boolean;
+  offscreenCanvas: boolean;
+  aliasedPointSizeRange: [number, number];
+  maxTextureSize: number;
+  maxVertexTextureImageUnits: number;
+  recommendedBudgetPreset: RenderPointBudgetPreset;
+}
+
+export interface RendererStats {
+  backend: 'webgpu' | 'webgl' | 'main-thread';
+  pointBudgetPreset: RenderPointBudgetPreset;
+  maxPoints: number;
+  renderedEntityPoints: number;
+  renderedRelationPoints: number;
+  droppedPoints: number;
+  dofMode: RenderDofMode;
+  glowMode: RenderGlowMode;
+  transparencyMode: RenderTransparencyMode;
+  postProcessingActive: boolean;
 }
 
 export type SimulationCommand =
@@ -53,7 +92,8 @@ export type RenderCommand =
   | { type: 'Dispose' };
 
 export type RenderEvent =
-  | { type: 'RendererReady'; backend: 'webgpu' | 'webgl' }
+  | { type: 'RendererReady'; backend: 'webgpu' | 'webgl'; capabilities: RendererCapabilities }
+  | { type: 'RendererStats'; stats: RendererStats }
   | { type: 'HoverResult'; selection?: { kind: 'anchor' | 'relation'; id: string } }
   | { type: 'PickResult'; selection?: { kind: 'anchor' | 'relation'; id: string } }
   | { type: 'Log'; message: string };
